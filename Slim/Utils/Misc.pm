@@ -48,6 +48,8 @@ use URI::Escape;
 use URI::file;
 use Digest::SHA1 qw(sha1_hex);
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 # These must be 'required', as they use functions from the Misc module!
 require Slim::Music::Info;
 require Slim::Player::ProtocolHandlers;

@@ -4,6 +4,8 @@ use strict;
 
 use Image::Scale;
 
+use if $^O eq 'MSWin32', 'Win32::UTCFileTime';
+
 my $debug;
 
 =head1 ($dataref, $format) = resize( %args )

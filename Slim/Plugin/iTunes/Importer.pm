@@ -14,6 +14,8 @@ use File::Basename;
 use File::Path qw(rmtree);
 use XML::Parser;
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 INIT: {
 	if ($] > 5.007) {
 		require Encode;
@@ -337,7 +339,7 @@ sub handleTrack {
 		# properties directly in iTunes (dumb) - the
 		# actual mtime of the file is updated however.
 
-		my $mtime = (stat _)[9];
+		my $mtime = (stat(main::ISWINDOWS ? $file : _))[9];
 		my $ctime = str2time($curTrack->{'Date Added'});
 
 		# If the file hasn't changed since the last

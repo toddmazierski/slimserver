@@ -35,6 +35,8 @@ use IO::String;
 use Path::Class;
 use Scalar::Util qw(blessed);
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 use Slim::Formats;
 use Slim::Formats::Playlists;
 use Slim::Music::Info;
@@ -254,7 +256,7 @@ sub findNewAndChangedFiles {
 	# Check the file list against the last rescan time to determine changed files.
 	for my $file (@{$onDisk}) {
 		# Only rescan the file if it's changed since our last scan time.
-		if ($last && -r $file && (stat(_))[9] > $last) {
+		if ($last && -r $file && (stat(main::ISWINDOWS ? $file : _))[9] > $last) {
 			$found->{$file} = 1;
 		}
 	}

@@ -18,6 +18,8 @@ use File::Next;
 use File::Spec ();
 use Path::Class ();
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 use Slim::Music::Info;
 use Slim::Utils::Misc;
 use Slim::Utils::Log;
@@ -149,11 +151,13 @@ sub find {
 		if ( !(stat _)[9] ) {
 			stat $file;
 		}
+
+		my @stat = stat(main::ISWINDOWS ? $file : _);
 		
 		$sth->execute(
 			Slim::Utils::Misc::fileURLFromPath($file),
-			(stat _)[9], # mtime
-			-d _ ? 0 : (stat _)[7], # size, 0 for directories
+			$stat[9], # mtime
+			-d _ ? 0 : $stat[7], # size, 0 for directories
 		);
 		
 		return 1;

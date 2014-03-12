@@ -38,6 +38,8 @@ use Storable;
 use Tie::Cache::LRU::Expires;
 use URI;
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 use Slim::Formats;
 use Slim::Player::ProtocolHandlers;
 use Slim::Utils::Log;
@@ -2395,7 +2397,7 @@ sub _hasChanged {
 		my $agecheck = 0;
 
 		if ($agedef) {
-			$agecheck = ((stat(_))[9] == $timestamp);
+			$agecheck = ((stat(main::ISWINDOWS ? $filepath : _))[9] == $timestamp);
 		}
 
 		return 0 if  $fsdef && $fscheck && $agedef && $agecheck;

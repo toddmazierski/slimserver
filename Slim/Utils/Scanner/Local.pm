@@ -14,6 +14,8 @@ use FileHandle;
 use Path::Class ();
 use Scalar::Util qw(blessed);
 
+use if main::ISWINDOWS, 'Win32::UTCFileTime';
+
 use Slim::Utils::Misc ();
 use Slim::Utils::Log;
 use Slim::Utils::Prefs;
@@ -78,10 +80,12 @@ sub find {
 				(?, ?, ?)
 			} );
 			
+			my @stat = stat(main::ISWINDOWS ? $path : _);
+			
 			$sth->execute(
 				$file,
-				(stat _)[9], # mtime
-				(stat _)[7], # size
+				$stat[9], # mtime
+				$stat[7], # size
 			);
 			
 			# Callback that we found 1 file
