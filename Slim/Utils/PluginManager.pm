@@ -70,6 +70,8 @@ sub init {
 			$downloader = 'Slim::Utils::PluginDownloader';
 			$downloader->init;
 		};
+		
+		$@ && $log->error("Failed to load plugin downloader: $@");
 	}
 
 	my $pendingOps;
@@ -342,7 +344,18 @@ sub load {
 
 			main::DEBUGLOG && $log->debug("Adding Bin directory: [$binDir]");
 
-			Slim::Utils::Misc::addFindBinPaths( catdir($binDir, Slim::Utils::OSDetect::details()->{'binArch'}), $binDir );
+			my $binArch = Slim::Utils::OSDetect::details()->{'binArch'};
+			my @paths = ( catdir($binDir, $binArch), $binDir );
+
+			if ( $binArch =~ /i386-linux/i ) {
+	 			my $arch = $Config::Config{'archname'};
+	 			
+				if ( $arch && $arch =~ s/^x86_64-([^-]+).*/x86_64-$1/ ) {
+					unshift @paths, catdir($binDir, $arch);
+				}
+			}
+
+			Slim::Utils::Misc::addFindBinPaths( @paths );
 		}
 
 		# add skin folders even in noweb mode: we'll need them for the icons
@@ -534,7 +547,9 @@ sub message {
 
 	$message = shift if @_;
 
-	return ($class->needsRestart && Slim::Utils::Strings::string('PLUGINS_RESTART_MSG')) || $message;
+	return $class->needsRestart 
+		? Slim::Utils::Strings::string('PLUGINS_RESTART_MSG') . ' (' . join(', ', grep { $prefs->get($_) =~ /needs/ } keys %{$prefs->all}) . ')'
+		: $message;
 }
 
 sub _pluginCacheFile {
