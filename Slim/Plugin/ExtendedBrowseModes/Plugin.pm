@@ -20,6 +20,12 @@ use Slim::Utils::Text;
 my $prefs = preferences('plugin.extendedbrowsemodes');
 my $serverPrefs = preferences('server');
 
+my $log = Slim::Utils::Log->addLogCategory( {
+	category     => 'plugin.extendedbrowsemodes',
+	defaultLevel => 'ERROR',
+	description  => 'PLUGIN_EXTENDED_BROWSEMODES',
+} );
+
 $prefs->init({
 	additionalMenuItems => [{
 		name    => string('PLUGIN_EXTENDED_BROWSEMODES_BROWSE_BY_COMPOSERS'),
@@ -54,8 +60,7 @@ $prefs->init({
 });
 
 $prefs->setChange( \&initMenus, 'additionalMenuItems' );
-Slim::Control::Request::subscribe( \&initMenus, [['library'], ['changed']] );
-Slim::Control::Request::subscribe( \&initMenus, [['rescan'], ['done']] );
+Slim::Control::Request::subscribe( \&initMenus, [['library', 'rescan'], ['changed','done']] );
 
 $prefs->setChange( sub {
 	__PACKAGE__->initLibraries($_[1] || 0);
@@ -255,6 +260,8 @@ sub initMenus {
 sub registerBrowseMode {
 	my ($class, $item) = @_;
 	
+	main::DEBUGLOG && $log->is_debug && $log->debug("Initializing menu: " . Data::Dump::dump($item));
+	
 	# create string token if it doesn't exist already
 	my $nameToken = $class->registerCustomString($item->{name});
 
@@ -270,30 +277,29 @@ sub registerBrowseMode {
 	my $icon = $item->{icon};
 
 	# replace feed placeholders
-	my ($feed, $mode);
+	my ($feed, $mode, $params);
 	if ( ref $item->{feed} eq 'CODE' ) {
 		$feed = $item->{feed};
+		%$params = map {
+			my $v = Slim::Plugin::ExtendedBrowseModes::Plugin->valueToId($item->{params}->{$_}, $_);
+			{ $_ => $v };
+		} keys %{ $item->{params} || {} };
 	}
 	elsif ( $item->{feed} =~ /\balbums$/ ) {
-		$feed = \&Slim::Menu::BrowseLibrary::_albums;
+		$feed = \&_albums;
 		$icon = 'html/images/albums.png';
 		$mode = $item->{params}->{mode} || $item->{id};
 	}
 	else {
-		$feed = \&Slim::Menu::BrowseLibrary::_artists;
+		$feed = \&_artists;
 		$icon = 'html/images/artists.png';
 		$mode = $item->{params}->{mode} || $item->{id};
 	}
 	
-	my %params = map {
-		my $v = Slim::Plugin::ExtendedBrowseModes::Plugin->valueToId($item->{params}->{$_}, $_);
-		{ $_ => $v };
-	} keys %{ $item->{params} || {} };
-	
-	Slim::Menu::BrowseLibrary->registerNode({
+	my $menu = {
 		type         => 'link',
 		name         => $nameToken,
-		params       => \%params,
+		params       => $params || $item->{params},
 		feed         => $feed,
 		icon         => $icon,
 		jiveIcon     => $icon,
@@ -302,7 +308,11 @@ sub registerBrowseMode {
 		id           => $item->{id},
 		weight       => $item->{weight},
 		cache        => $item->{nocache} ? 0 : 1,
-	});
+	};
+
+	main::DEBUGLOG && $log->is_debug && $log->debug("Registering menu definition: " . Data::Dump::dump($menu));
+	
+	Slim::Menu::BrowseLibrary->registerNode($menu);
 }
 
 sub registerCustomString {
@@ -345,14 +355,17 @@ sub valueToId {
 	
 	my $schema;
 	if ($category eq 'genre') {
-		$schema = 'Genre';
+		$schema = 'genres';
 	}
 	elsif ($category eq 'artist') {
-		$schema = 'Contributor';
+		$schema = 'contributors';
 	}
 	
 	# replace names with IDs
 	if ( $schema && Slim::Schema::hasLibrary() ) {
+		my $dbh = Slim::Schema->dbh;
+		my $sth = $dbh->prepare_cached( "SELECT id FROM $schema WHERE namesearch = ?" );
+		
 		$value = join(',', grep {
 			$_ !~ /\D/
 		} map {
@@ -361,11 +374,10 @@ sub valueToId {
 			$_ = Slim::Utils::Unicode::utf8decode_locale($_);
 			$_ = Slim::Utils::Text::ignoreCaseArticles($_, 1);
 			
-			if ( !Slim::Schema->rs($schema)->find($_) && (my $item = Slim::Schema->rs($schema)->search({ 'namesearch' => $_ })->first) ) {
-				$_ = $item->id;
-			}
+			my ($id) = $dbh->selectrow_array($sth, undef, $_);
+			$sth->finish;
 			
-			$_;
+			$id || $_;
 		} split(/,/, $value) );
 	}
 
@@ -420,6 +432,35 @@ sub _randomAlbums {
 		
 		$callback->(@_);
 	}, $args, $pt );
+}
+
+sub _albums {
+	my ($client, $callback, $args, $pt) = @_;
+
+	_parseSearchTags($pt);
+
+	Slim::Menu::BrowseLibrary::_albums( $client, $callback, $args, $pt );
+}
+
+sub _artists {
+	my ($client, $callback, $args, $pt) = @_;
+
+	_parseSearchTags($pt);
+
+	Slim::Menu::BrowseLibrary::_artists( $client, $callback, $args, $pt );
+}
+
+sub _parseSearchTags {
+	my $pt = shift;
+	
+	if ( $pt->{'searchTags'} ) {
+		$pt->{'searchTags'} = [ map {
+			my ($k, $v) = /(.*?):(.*)/;
+			"$k:" . Slim::Plugin::ExtendedBrowseModes::Plugin->valueToId($v, $k);
+		} @{$pt->{'searchTags'}} ];
+	}
+	
+	return $pt;
 }
 
 1;
