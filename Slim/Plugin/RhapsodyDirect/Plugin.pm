@@ -38,7 +38,7 @@ sub initPlugin {
 	
 	Slim::Networking::Slimproto::addHandler( 
 		RPDS => \&rpds_handler
-	);
+	) if !main::SLIM_SERVICE;
 	
 	# Track Info item
 	Slim::Menu::TrackInfo->registerInfoProvider( rhapsody => (

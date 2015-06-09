@@ -30,12 +30,14 @@ my $prefs = preferences('server');
 
 sub isRemote { 1 }
 
-sub getFormatForURL { 'mp3' }
+sub getFormatForURL { main::SLIM_SERVICE ? 'mp4' : 'mp3' }
+
+sub formatOverride { main::SLIM_SERVICE ? 'aac' : 'mp3' }
 
 # default buffer 3 seconds of 192k audio
 sub bufferThreshold { 24 * ( $prefs->get('bufferSecs') || 3 ) }
 
-sub canSeek {
+sub canSeek { if ( !main::SLIM_SERVICE ) {
 	my ( $class, $client, $song ) = @_;
 	
 	# No seeking on radio tracks
@@ -44,7 +46,7 @@ sub canSeek {
 	}
 	
 	return 1;
-}
+} }
 
 sub canSeekError { return ( 'SEEK_ERROR_TYPE_NOT_SUPPORTED', 'Rhapsody Radio' ); }
 
@@ -67,7 +69,7 @@ sub new {
 		bitrate => $streamUrl =~ /\.mp3$/ ? 128_000 : 192_000,
 	} ) || return;
 	
-	${*$sock}{contentType} = 'audio/mpeg';
+	${*$sock}{contentType} = main::SLIM_SERVICE ? 'audio/mp4' : 'audio/mpeg';
 
 	return $sock;
 }
@@ -79,7 +81,9 @@ sub scanUrl {
 }
 
 # Set pcmsamplesize to 3 in slimproto strm to indicate Rhapsody mode
-sub pcmsamplesize { 
+sub pcmsamplesize { if ( main::SLIM_SERVICE ) {
+	return 0;
+} else {
 	my ( $class, $client, $params ) = @_;
 
 	# If player is playing a 30-second preview, it's plain MP3
@@ -89,7 +93,7 @@ sub pcmsamplesize {
 	
 	# Otherwise it's RAD
 	return 3;
-}
+} }
 
 # Source for AudioScrobbler
 sub audioScrobblerSource {
@@ -148,7 +152,7 @@ sub parseDirectHeaders {
 	$client->streamingSong->bitrate($bitrate);
 
 	# ($title, $bitrate, $metaint, $redir, $contentType, $length, $body)
-	return (undef, $bitrate, 0, '', 'mp3', $length, undef);
+	return (undef, $bitrate, 0, '', (main::SLIM_SERVICE ? 'aac' : 'mp3'), $length, undef);
 }
 
 # Don't allow looping
@@ -237,6 +241,7 @@ sub getNextTrack {
 		}
 	}
 	
+	# XXX - need to verify this
 	foreach ($client->syncGroupActiveMembers()) {
 		if (!$_->canDecodeRhapsody()) {
 			$errorCb->('PLUGIN_RHAPSODY_DIRECT_PLAYER_REQUIRED',
@@ -322,7 +327,7 @@ sub _gotNextRadioTrack {
 	}
 	
 	# set metadata for track, will be set on playlist newsong callback
-	$url      = 'rhapd://' . $track->{trackId} . '.mp3';
+	$url      = 'rhapd://' . $track->{trackId} . (main::SLIM_SERVICE ? '.m4a' : '.mp3');
 	my $title = $track->{name} . ' ' . 
 			$client->string('BY') . ' ' . $track->{displayArtistName} . ' ' . 
 			$client->string('FROM') . ' ' . $track->{displayAlbumName};
@@ -339,7 +344,7 @@ sub _gotNextRadioTrack {
 		cover     => $track->{cover},
 		duration  => $track->{playbackSeconds},
 		bitrate   => '192k CBR',
-		type      => 'MP3 (Rhapsody)',
+		type      => (main::SLIM_SERVICE ? 'M4A' : 'MP3') . ' (Rhapsody)',
 		info_link => 'plugins/rhapsodydirect/trackinfo.html',
 		icon      => Slim::Plugin::RhapsodyDirect::Plugin->_pluginDataFor('icon'),
 		buttons   => {
@@ -384,7 +389,7 @@ sub _getTrackInfo {
 	return if $song->pluginData('abandonSong');
 
 	# Get track URL for the next track
-	my ($trackId) = $params->{'url'} =~ m{rhapd://(.+)\.mp3};
+	my ($trackId) = $params->{'url'} =~ m{rhapd://(.+)\.(?:m4a|mp3)};
 	
 	my $http = Slim::Networking::SqueezeNetwork->new(
 		sub {
@@ -481,7 +486,7 @@ sub _gotTrackError {
 	_handleClientError( $error, $client, $params );
 }
 
-sub onStream {
+sub onStream { if ( !main::SLIM_SERVICE ) {
 	my ($self, $client, $song) = @_;
 	
 	# If IP has changed, send this info
@@ -522,7 +527,7 @@ sub onStream {
 		
 		$client->sendFrame( rpds => \$data );
 	}
-}
+} }
 	
 # Metadata for a URL, used by CLI/JSON clients
 sub getMetadataFor {
@@ -535,7 +540,7 @@ sub getMetadataFor {
 		if (!$song || !($url = $song->pluginData('radioTrackURL'))) {
 			return {
 				bitrate   => '192k CBR',
-				type      => 'MP3 (Rhapsody)',
+				type      => (main::SLIM_SERVICE ? 'M4A' : 'MP3') . ' (Rhapsody)',
 				icon      => $icon,
 				cover     => $icon,
 #				buttons   => { service => Slim::Control::Jive::simpleServiceButton($client, __PACKAGE__->getIcon(), 'rhapsodydirect', 'PLUGIN_RHAPSODY_DIRECT_MODULE_NAME')},
@@ -548,7 +553,7 @@ sub getMetadataFor {
 	my $cache = Slim::Utils::Cache->new;
 	
 	# If metadata is not here, fetch it so the next poll will include the data
-	my ($trackId) = $url =~ m{rhapd://(.+)\.mp3};
+	my ($trackId) = $url =~ m{rhapd://(.+)\.(?:m4a|mp3)};
 	my $meta      = $cache->get( 'rhapsody_meta_' . $trackId );
 	
 	if ( !$meta && !$client->master->pluginData('fetchingMeta') ) {
@@ -560,7 +565,7 @@ sub getMetadataFor {
 		
 		for my $track ( @{ Slim::Player::Playlist::playList($client) } ) {
 			my $trackURL = blessed($track) ? $track->url : $track;
-			if ( $trackURL =~ m{rhapd://(.+)\.mp3} ) {
+			if ( $trackURL =~ m{rhapd://(.+)\.(?:m4a|mp3)} ) {
 				my $id = $1;
 				if ( !$cache->get("rhapsody_meta_$id") ) {
 					push @need, $id;
@@ -589,14 +594,14 @@ sub getMetadataFor {
 			$metaUrl,
 			'Content-Type' => 'application/x-www-form-urlencoded',
 			'trackIds=' . join( ',', @need ),
-		);
+		) if scalar @need;
 	}
 	
 	#$log->debug( "Returning metadata for: $url" . ($meta ? '' : ': default') );
 	
 	return $meta || {
 		bitrate   => '192k CBR',
-		type      => 'MP3 (Rhapsody)',
+		type      => (main::SLIM_SERVICE ? 'M4A' : 'MP3') . ' (Rhapsody)',
 		icon      => $icon,
 		cover     => $icon,
 #		buttons   => { service => Slim::Control::Jive::simpleServiceButton($client, __PACKAGE__->getIcon(), 'rhapsodydirect', 'PLUGIN_RHAPSODY_DIRECT_MODULE_NAME')},
@@ -633,7 +638,7 @@ sub _gotBulkMetadata {
 		my $meta = {
 			%{$track},
 			bitrate   => '192k CBR',
-			type      => 'MP3 (Rhapsody)',
+			type      => (main::SLIM_SERVICE ? 'M4A' : 'MP3') . ' (Rhapsody)',
 			info_link => 'plugins/rhapsodydirect/trackinfo.html',
 			icon      => $icon,
 #			buttons   => { service => Slim::Control::Jive::simpleServiceButton($client, __PACKAGE__->getIcon(), 'rhapsodydirect', 'PLUGIN_RHAPSODY_DIRECT_MODULE_NAME')},
@@ -710,7 +715,7 @@ sub trackInfoURL {
 		$stationId = $1;
 	}
 
-	my ($trackId) = $url =~ m{rhapd://(.+)\.mp3};
+	my ($trackId) = $url =~ m{rhapd://(.+)\.(?:m4a|mp3)};
 	
 	# SN URL to fetch track info menu
 	my $trackInfoURL = Slim::Networking::SqueezeNetwork->url(
@@ -784,12 +789,12 @@ sub _doLog {
 		
 		my $url = $song->pluginData('radioTrackURL');
 		
-		($trackId) = $url =~ m{rhapd://(.+)\.mp3};		
+		($trackId) = $url =~ m{rhapd://(.+)\.(?:m4a|mp3)};		
 	}
 	else {
 		# logMeteringInfo
 		$stationId = '';
-		($trackId) = $song->track()->url =~ m{rhapd://(.+)\.mp3};
+		($trackId) = $song->track()->url =~ m{rhapd://(.+)\.(?:m4a|mp3)};
 	}
 	
 	my $logURL = Slim::Networking::SqueezeNetwork->url(
@@ -820,7 +825,10 @@ sub _doLog {
 }
 
 
-sub getSeekData {
+sub getSeekData { if ( main::SLIM_SERVICE ) {
+	my $class = shift;
+	return $class->SUPER::getSeekData(@_);
+} else {
 	my ( $class, $client, $song, $newtime ) = @_;
 	
 	# Determine byte offset and song length in bytes
@@ -848,7 +856,7 @@ sub getSeekData {
 		eaoffset           => $eaoffset,
 		ealength           => $ealength,
 	};
-}
+} }
 
 # SN only, re-init upon reconnection
 sub reinit { if ( main::SLIM_SERVICE ) {
