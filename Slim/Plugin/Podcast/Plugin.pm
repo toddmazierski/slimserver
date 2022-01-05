@@ -60,6 +60,7 @@ sub initPlugin {
 
 	registerProvider('Slim::Plugin::Podcast::PodcastIndex');
 	registerProvider('Slim::Plugin::Podcast::GPodder');
+	registerProvider('Slim::Plugin::Podcast::NoProvider');
 
 	$prefs->init({
 		feeds => [],
